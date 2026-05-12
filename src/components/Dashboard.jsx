@@ -25,7 +25,7 @@ import {
   registrarPagamento,
   updateCliente
 } from '../services/mutations';
-import { syncPendingChanges } from '../sync/supabaseSync';
+import { syncAllChanges } from '../sync/supabaseSync';
 import { supabase } from '../lib/supabase';
 import { upsertProfile } from '../services/profiles';
 import { formatMoney } from '../utils/format';
@@ -160,10 +160,10 @@ export function Dashboard({ currentUser, profile, onProfileUpdated, isOnline, la
 
   async function handleSync() {
     setIsSyncing(true);
-    const result = await syncPendingChanges();
+    const result = await syncAllChanges();
     await loadDashboard();
     setIsSyncing(false);
-    showToast(result.skipped ? 'Nada para sincronizar agora' : 'Caderninho sincronizado');
+    showToast(result.skipped ? 'Nada para sincronizar agora' : `Sincronizado: ${result.synced} envio(s), ${result.pulled} recebido(s)`);
   }
 
   async function handleInstall() {

@@ -3,7 +3,7 @@ import { AuthScreen } from './components/auth/AuthScreen';
 import { Dashboard } from './components/Dashboard';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { getProfile } from './services/profiles';
-import { registerOnlineSync } from './sync/supabaseSync';
+import { registerOnlineSync, syncAllChanges } from './sync/supabaseSync';
 
 export default function App() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -70,6 +70,18 @@ export default function App() {
     };
   }, [session?.user?.id]);
 
+  useEffect(() => {
+    async function syncAfterLogin() {
+      if (!session?.user?.id || !navigator.onLine) return;
+
+      const result = await syncAllChanges();
+      if (!result.skipped) {
+        setLastSync(new Date().toLocaleTimeString('pt-BR'));
+      }
+    }
+
+    syncAfterLogin();
+  }, [session?.user?.id]);
   useEffect(() => {
     function updateOnlineStatus() {
       setIsOnline(navigator.onLine);

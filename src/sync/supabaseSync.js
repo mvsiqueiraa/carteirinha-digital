@@ -118,9 +118,20 @@ export async function pullLatestChanges() {
   return { pulled, skipped: false };
 }
 
+export async function syncAllChanges() {
+  const pushed = await syncPendingChanges();
+  const pulled = await pullLatestChanges();
+
+  return {
+    synced: pushed.synced ?? 0,
+    pulled: pulled.pulled ?? 0,
+    skipped: pushed.skipped && pulled.skipped
+  };
+}
+
 export function registerOnlineSync(onSynced) {
   async function runSync() {
-    const result = await syncPendingChanges();
+    const result = await syncAllChanges();
     onSynced?.(result);
   }
 
