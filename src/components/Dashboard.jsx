@@ -4,7 +4,6 @@ import {
   CalendarDays,
   ClipboardList,
   Home,
-  ListChecks,
   Plus,
   Receipt,
   ReceiptText,
@@ -16,15 +15,18 @@ import {
 } from 'lucide-react';
 import { getDashboardData } from '../services/charges';
 import {
+  ajustarParcelas,
   createCliente,
   createContaComLembrete,
+  deleteCliente,
+  deleteConta,
+  distribuirRestanteDaParcela,
   registrarPagamento,
-  resolverLembrete,
   updateCliente
 } from '../services/mutations';
 import { syncPendingChanges } from '../sync/supabaseSync';
 import { formatMoney } from '../utils/format';
-import { ClienteForm, ContaForm, PagamentoForm } from './dashboard/forms';
+import { AjustarParcelasForm, ClienteForm, ContaForm, PagamentoForm } from './dashboard/forms';
 import {
   ChargeDetail,
   ChargesList,
@@ -66,7 +68,7 @@ function BottomNav({ activeTab, setActiveTab }) {
   const tabs = [
     ['cobrancas', 'Cobrancas', Home],
     ['clientes', 'Clientes', Users],
-    ['lembretes', 'Lembretes', ListChecks]
+    ['lembretes', 'Agenda', CalendarDays]
   ];
 
   return (
@@ -166,9 +168,10 @@ export function Dashboard({ isOnline, lastSync, isSupabaseConfigured }) {
     setInstallPrompt(null);
   }
 
-  function openPayment(cobranca, parcela = null) {
+  function openPayment(cobranca, parcela = undefined) {
+    const parcelaAtual = parcela === undefined ? cobranca.lembrete ?? null : parcela;
     setSelectedCharge(cobranca);
-    setSelectedInstallment(parcela);
+    setSelectedInstallment(parcelaAtual);
     setModal('pagamento');
   }
 
@@ -213,6 +216,17 @@ export function Dashboard({ isOnline, lastSync, isSupabaseConfigured }) {
     setSelectedClient(null);
     showToast('Cliente atualizado');
   }
+  async function removeSelectedClient() {
+    if (!selectedClient) return;
+    const confirmed = window.confirm('Excluir este cliente e todas as cobrancas dele? Essa acao sera sincronizada quando houver internet.');
+    if (!confirmed) return;
+
+    await deleteCliente(selectedClient.id);
+    setModal(null);
+    setSelectedClient(null);
+    showToast('Cliente excluido');
+  }
+
 
   async function saveCharge(form) {
     await createContaComLembrete(form);
@@ -222,25 +236,60 @@ export function Dashboard({ isOnline, lastSync, isSupabaseConfigured }) {
   }
 
   async function savePayment(form) {
-    await registrarPagamento(form);
-
-    if (selectedInstallment) {
-      await resolverLembrete(selectedInstallment.id);
-    }
+    const result = await registrarPagamento(form);
+    const excedente = result?.ajuste?.excedenteAbatido ?? 0;
 
     setModal(null);
     setSelectedCharge(null);
     setSelectedInstallment(null);
-    showToast(selectedInstallment ? 'Parcela paga' : 'Pagamento salvo offline');
+
+    if (excedente > 0) {
+      showToast(`${formatMoney(excedente)} abatidos nas proximas parcelas`);
+      return;
+    }
+
+    showToast(selectedInstallment ? 'Pagamento da parcela salvo' : 'Pagamento salvo offline');
+  }
+  async function saveInstallmentAdjustment(form) {
+    if (!selectedCharge) return;
+
+    await ajustarParcelas(selectedCharge.conta.id, form);
+    setModal(null);
+    setSelectedCharge(null);
+    setSelectedInstallment(null);
+    showToast('Parcelas ajustadas');
   }
 
-  async function resolveReminder(cobranca) {
-    if (!cobranca.lembrete) return;
-    await resolverLembrete(cobranca.lembrete.id);
-    showToast('Lembrete resolvido');
+  async function distributePartialInstallment(parcela) {
+    if (!selectedCharge || !parcela) return;
+
+    await distribuirRestanteDaParcela(selectedCharge.conta.id, parcela.id);
+    setModal(null);
+    setSelectedCharge(null);
+    setSelectedInstallment(null);
+    showToast('Restante distribuido nas proximas parcelas');
   }
 
-  const currentTitle = activeTab === 'clientes' ? 'Clientes' : activeTab === 'lembretes' ? 'Lembretes' : 'Cobrancas';
+  async function removeSelectedCharge() {
+    if (!selectedCharge) return;
+    const confirmed = window.confirm('Excluir esta divida com pagamentos, parcelas e datas de cobranca relacionadas?');
+    if (!confirmed) return;
+
+    await deleteConta(selectedCharge.conta.id);
+    setModal(null);
+    setSelectedCharge(null);
+    setSelectedInstallment(null);
+    showToast('Divida excluida');
+  }
+
+  function showChargeFilter(nextFilter) {
+    setActiveTab('cobrancas');
+    setFilter(nextFilter);
+    setQuery('');
+    setDebouncedQuery('');
+  }
+
+  const currentTitle = activeTab === 'clientes' ? 'Clientes' : activeTab === 'lembretes' ? 'Agenda' : 'Cobrancas';
 
   return (
     <main className="min-h-screen bg-app-paper pb-28 text-app-ink">
@@ -296,7 +345,7 @@ export function Dashboard({ isOnline, lastSync, isSupabaseConfigured }) {
             </div>
             <div className="text-left">
               <p className="font-black text-app-ink">Anotar compra</p>
-              <p className="text-xs font-bold text-app-muted">Registre uma venda no fiado</p>
+              <p className="text-xs font-bold text-app-muted">Registre uma venda</p>
             </div>
           </button>
         </section>
@@ -304,16 +353,28 @@ export function Dashboard({ isOnline, lastSync, isSupabaseConfigured }) {
 
       {activeTab === 'cobrancas' ? (
         <section className="mx-auto grid max-w-md grid-cols-2 gap-3 px-4 py-4">
-          <div className="rounded-lg border border-red-100 bg-white p-4 shadow-note">
+          <button
+            aria-pressed={filter === 'atrasados'}
+            className={`rounded-lg border bg-white p-4 text-left shadow-note transition active:scale-95 ${filter === 'atrasados' ? 'border-app-red ring-2 ring-red-100' : 'border-red-100'}`}
+            onClick={() => showChargeFilter('atrasados')}
+            type="button"
+          >
             <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-red-50 text-app-red"><ReceiptText size={22} /></div>
             <p className="text-sm font-bold text-app-red">Atrasados</p>
             <strong className="mt-1 block text-3xl">{data.quantidadeAtrasados}</strong>
-          </div>
-          <div className="rounded-lg border border-yellow-100 bg-white p-4 shadow-note">
+            <span className="mt-2 block text-xs font-black text-app-muted">Ver lista</span>
+          </button>
+          <button
+            aria-pressed={filter === 'hoje'}
+            className={`rounded-lg border bg-white p-4 text-left shadow-note transition active:scale-95 ${filter === 'hoje' ? 'border-app-yellow ring-2 ring-yellow-100' : 'border-yellow-100'}`}
+            onClick={() => showChargeFilter('hoje')}
+            type="button"
+          >
             <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-yellow-50 text-app-yellow"><CalendarDays size={22} /></div>
             <p className="text-sm font-bold text-app-yellow">Para hoje</p>
             <strong className="mt-1 block text-3xl">{data.cobrancasDoDia.length}</strong>
-          </div>
+            <span className="mt-2 block text-xs font-black text-app-muted">Ver lista</span>
+          </button>
         </section>
       ) : null}
 
@@ -365,7 +426,7 @@ export function Dashboard({ isOnline, lastSync, isSupabaseConfigured }) {
           </>
         ) : null}
 
-        {activeTab === 'lembretes' ? <RemindersList lembretes={data.lembretes} onResolve={resolveReminder} /> : null}
+        {activeTab === 'lembretes' ? <RemindersList lembretes={data.lembretes} onPayment={(cobranca) => openPayment(cobranca, cobranca.lembrete)} /> : null}
       </section>
 
       <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} />
@@ -373,15 +434,20 @@ export function Dashboard({ isOnline, lastSync, isSupabaseConfigured }) {
       {toast ? <div className="fixed bottom-24 left-1/2 z-50 w-[calc(100%-32px)] max-w-md -translate-x-1/2 rounded-lg bg-app-ink px-4 py-3 text-center text-sm font-black text-white shadow-soft">{toast}</div> : null}
 
       {modal === 'cliente' ? <Modal title="Novo cliente" onClose={() => setModal(null)}><ClienteForm onSubmit={saveClient} /></Modal> : null}
-      {modal === 'editar-cliente' && selectedClient ? <Modal title="Editar cliente" onClose={() => { setModal(null); setSelectedClient(null); }}><ClienteForm initialData={selectedClient} onSubmit={saveEditedClient} /></Modal> : null}
+      {modal === 'editar-cliente' && selectedClient ? <Modal title="Editar cliente" onClose={() => { setModal(null); setSelectedClient(null); }}><ClienteForm initialData={selectedClient} onSubmit={saveEditedClient} onDelete={removeSelectedClient} /></Modal> : null}
       {modal === 'conta' ? <Modal title="Nova cobranca" onClose={() => setModal(null)}><ContaForm clientes={data.clientes} onSubmit={saveCharge} onCreateCliente={() => setModal('cliente')} /></Modal> : null}
       {modal === 'pagamento' && selectedCharge ? <Modal title={selectedInstallment ? 'Receber parcela' : 'Registrar pagamento'} onClose={closePayment}><PagamentoForm cobranca={selectedCharge} parcela={selectedInstallment} onSubmit={savePayment} /></Modal> : null}
+      {modal === 'ajustar-parcelas' && selectedCharge ? <Modal title="Ajustar parcelas" onClose={() => setModal(null)}><AjustarParcelasForm cobranca={selectedCharge} onSubmit={saveInstallmentAdjustment} /></Modal> : null}
       {modal === 'detalhe-cobranca' && selectedCharge ? (
-        <Modal title="Historico da conta" onClose={() => setModal(null)}>
+        <Modal title="Detalhes da cobranca" onClose={() => setModal(null)}>
           <ChargeDetail
             cobranca={selectedCharge}
             onPayment={() => openPayment(selectedCharge)}
+            onGeneralPayment={() => openPayment(selectedCharge, null)}
             onPayInstallment={(parcela) => openPayment(selectedCharge, parcela)}
+            onDistributePartial={distributePartialInstallment}
+            onAdjustPlan={() => setModal('ajustar-parcelas')}
+            onDelete={removeSelectedCharge}
           />
         </Modal>
       ) : null}
@@ -389,3 +455,4 @@ export function Dashboard({ isOnline, lastSync, isSupabaseConfigured }) {
     </main>
   );
 }
+

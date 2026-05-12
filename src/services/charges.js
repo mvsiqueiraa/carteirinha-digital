@@ -1,7 +1,11 @@
-import { db } from '../db';
+﻿import { db } from '../db';
 
 function toDateOnly(value) {
   return new Date(`${value}T00:00:00`);
+}
+
+function roundMoney(value) {
+  return Number(Number(value || 0).toFixed(2));
 }
 
 export function getChargeStatus(lembrete, saldoRestante, todayIso) {
@@ -10,6 +14,53 @@ export function getChargeStatus(lembrete, saldoRestante, todayIso) {
   if (lembrete.data_agendada < todayIso) return 'atrasado';
   if (lembrete.data_agendada === todayIso) return 'hoje';
   return 'pendente';
+}
+
+function buildParcelas(conta, lembretesDaConta, totalPago) {
+  const totalParcelas = Number(conta.parcelas || lembretesDaConta.length || 1);
+  const valorPadrao = roundMoney(Number(conta.valor_total || 0) / totalParcelas);
+  let creditoLegado = totalPago;
+
+  return lembretesDaConta.map((lembrete, index) => {
+    const valorOriginal = roundMoney(
+      lembrete.valor_original ||
+      (Number(lembrete.valor_pago || 0) + Number(lembrete.valor_previsto || 0)) ||
+      lembrete.valor_previsto ||
+      valorPadrao
+    );
+
+    let valorPagoParcela = roundMoney(lembrete.valor_pago || 0);
+
+    if (!lembrete.valor_pago && lembrete.status === 'resolvido') {
+      valorPagoParcela = valorOriginal;
+    }
+
+    if (valorPagoParcela > 0) {
+      creditoLegado = roundMoney(Math.max(creditoLegado - valorPagoParcela, 0));
+    } else if (totalPago > 0) {
+      const abatimento = Math.min(creditoLegado, valorOriginal);
+      valorPagoParcela = roundMoney(abatimento);
+      creditoLegado = roundMoney(creditoLegado - abatimento);
+    }
+
+    const saldoParcela = Math.max(roundMoney(valorOriginal - valorPagoParcela), 0);
+    const estaPaga = saldoParcela <= 0.009 || lembrete.status === 'resolvido';
+    const statusVisual = estaPaga
+      ? 'paga'
+      : valorPagoParcela > 0
+        ? 'parcial'
+        : 'pendente';
+
+    return {
+      ...lembrete,
+      parcela_numero: Number(lembrete.parcela_numero || index + 1),
+      valor_original: valorOriginal,
+      valor_pago: valorPagoParcela,
+      valor_previsto: saldoParcela,
+      saldo_parcela: saldoParcela,
+      statusVisual
+    };
+  });
 }
 
 export async function getDashboardData(todayIso = new Date().toISOString().slice(0, 10)) {
@@ -46,17 +97,21 @@ export async function getDashboardData(todayIso = new Date().toISOString().slice
     .map((conta) => {
       const cliente = clientesById.get(conta.cliente_id);
       const transacoesDaConta = transacoesByConta.get(conta.id) ?? [];
-      const valorPago = transacoesDaConta.reduce(
+      const valorPago = roundMoney(transacoesDaConta.reduce(
         (total, transacao) => total + Number(transacao.valor_pago || 0),
         0
-      );
-      const saldoRestante = Math.max(Number(conta.valor_total) - valorPago, 0);
-      // Todos os lembretes da conta ordenados por data (para exibir o cronograma e achar o mais antigo)
-      const lembretesDaConta = activeLembretes
+      ));
+      const saldoRestante = Math.max(roundMoney(Number(conta.valor_total) - valorPago), 0);
+      const lembretesOriginais = activeLembretes
         .filter((item) => item.conta_id === conta.id)
-        .sort((a, b) => a.data_agendada.localeCompare(b.data_agendada));
-
-      const lembrete = lembretesDaConta.find((item) => item.status !== 'resolvido');
+        .sort((a, b) => {
+          const parcelaA = Number(a.parcela_numero || 0);
+          const parcelaB = Number(b.parcela_numero || 0);
+          if (parcelaA !== parcelaB) return parcelaA - parcelaB;
+          return a.data_agendada.localeCompare(b.data_agendada);
+        });
+      const parcelasDaConta = buildParcelas(conta, lembretesOriginais, valorPago);
+      const lembrete = parcelasDaConta.find((item) => item.saldo_parcela > 0.009);
 
       if (!cliente) return null;
 
@@ -70,7 +125,8 @@ export async function getDashboardData(todayIso = new Date().toISOString().slice
         conta,
         cliente,
         lembrete,
-        lembretesDaConta,
+        parcelasDaConta,
+        lembretesDaConta: parcelasDaConta,
         transacoes: transacoesDaConta.sort((a, b) =>
           b.data_pagamento.localeCompare(a.data_pagamento)
         ),
@@ -116,3 +172,4 @@ export async function getDashboardData(todayIso = new Date().toISOString().slice
     syncPendentes: syncQueue.length
   };
 }
+

@@ -1,10 +1,24 @@
-const CACHE_NAME = 'caderninho-digital-v1';
-const APP_SHELL = ['/', '/index.html', '/manifest.json', '/icons/icon.svg'];
+﻿const CACHE_NAME = 'caderninho-digital-v6';
+const APP_SHELL = [
+  '/',
+  '/index.html',
+  '/manifest.json',
+  '/icons/icon.svg',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png'
+];
+
+function isSameOrigin(url) {
+  return url.origin === self.location.origin;
+}
+
+async function cacheAppShell() {
+  const cache = await caches.open(CACHE_NAME);
+  await cache.addAll(APP_SHELL);
+}
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
-  );
+  event.waitUntil(cacheAppShell());
   self.skipWaiting();
 });
 
@@ -12,46 +26,55 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) =>
-        Promise.all(
-          keys
-            .filter((key) => key !== CACHE_NAME)
-            .map((key) => caches.delete(key))
-        )
-      )
+      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))))
+      .then(() => self.clients.claim())
   );
-  self.clients.claim();
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener('fetch', (event) => {
-  if (event.request.method !== 'GET') return;
+  const { request } = event;
+  const url = new URL(request.url);
 
-  if (event.request.mode === 'navigate') {
+  if (request.method !== 'GET' || !isSameOrigin(url)) return;
+
+  if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          const responseClone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put('/index.html', responseClone);
-          });
+      fetch(request)
+        .then(async (response) => {
+          const cache = await caches.open(CACHE_NAME);
+          cache.put('/index.html', response.clone());
           return response;
         })
-        .catch(() => caches.match('/index.html'))
+        .catch(async () => {
+          const cached = await caches.match('/index.html');
+          return cached || caches.match('/');
+        })
     );
     return;
   }
 
-  event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) return cachedResponse;
+  if (url.pathname.startsWith('/assets/') || url.pathname.startsWith('/icons/') || url.pathname === '/manifest.json') {
+    event.respondWith(
+      caches.match(request).then((cached) => {
+        const networkFetch = fetch(request)
+          .then(async (response) => {
+            if (response.ok) {
+              const cache = await caches.open(CACHE_NAME);
+              cache.put(request, response.clone());
+            }
+            return response;
+          })
+          .catch(() => cached);
 
-      return fetch(event.request).then((response) => {
-        const responseClone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          cache.put(event.request, responseClone);
-        });
-        return response;
-      });
-    })
-  );
+        return cached || networkFetch;
+      })
+    );
+  }
 });
+

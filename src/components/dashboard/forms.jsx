@@ -1,76 +1,28 @@
-﻿import { useRef, useState } from 'react';
-import { FileImage } from 'lucide-react';
+﻿import { useState } from 'react';
+import { Camera, FileImage, Trash2 } from 'lucide-react';
 import { normalizeMoney } from '../../services/mutations';
-import { formatCurrencyInput, formatMoney, formatPhone, todayIso } from '../../utils/format';
+import { formatCurrencyInput, formatDate, formatMoney, formatPhone, todayIso } from '../../utils/format';
 import { EmptyState, Field, inputClass, textAreaClass } from './ui';
 
-const parcelaOptions = [1, 2, 3, 4, 5, 6, 10, 12];
-
-function SignaturePad({ value, onChange }) {
-  const canvasRef = useRef(null);
-  const drawingRef = useRef(false);
-
-  function getPoint(event) {
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const point = event.touches?.[0] ?? event;
-    return { x: point.clientX - rect.left, y: point.clientY - rect.top };
-  }
-
-  function begin(event) {
-    event.preventDefault();
-    const context = canvasRef.current.getContext('2d');
-    const point = getPoint(event);
-    drawingRef.current = true;
-    context.beginPath();
-    context.moveTo(point.x, point.y);
-  }
-
-  function draw(event) {
-    if (!drawingRef.current) return;
-    event.preventDefault();
-    const canvas = canvasRef.current;
-    const context = canvas.getContext('2d');
-    const point = getPoint(event);
-    context.lineTo(point.x, point.y);
-    context.strokeStyle = '#2f211f';
-    context.lineWidth = 2.4;
-    context.lineCap = 'round';
-    context.stroke();
-    onChange(canvas.toDataURL('image/png'));
-  }
-
-  function clear() {
-    const canvas = canvasRef.current;
-    canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
-    onChange('');
-  }
-
-  return (
-    <div>
-      <div className="mb-2 flex items-center justify-between">
-        <span className="text-sm font-black text-app-muted">Assinatura</span>
-        <button className="text-sm font-black text-app-coralDark" onClick={clear} type="button">Limpar</button>
-      </div>
-      <canvas
-        ref={canvasRef}
-        width="640"
-        height="220"
-        className="h-32 w-full touch-none rounded-lg border border-dashed border-app-line bg-white"
-        onMouseDown={begin}
-        onMouseMove={draw}
-        onMouseUp={() => (drawingRef.current = false)}
-        onMouseLeave={() => (drawingRef.current = false)}
-        onTouchStart={begin}
-        onTouchMove={draw}
-        onTouchEnd={() => (drawingRef.current = false)}
-      />
-      {value ? <p className="mt-1 text-xs font-bold text-app-green">Assinatura capturada</p> : null}
-    </div>
-  );
+function addMonths(dateIso, monthsToAdd) {
+  const [year, month, day] = dateIso.split('-').map(Number);
+  const date = new Date(year, month - 1 + monthsToAdd, day);
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
 }
 
-export function ClienteForm({ initialData, onSubmit }) {
+function splitMoney(total, parts) {
+  if (parts <= 0) return [];
+  const base = Number((Number(total || 0) / parts).toFixed(2));
+  return Array.from({ length: parts }, (_, index) => {
+    const isLast = index === parts - 1;
+    return isLast ? Number((Number(total || 0) - base * (parts - 1)).toFixed(2)) : base;
+  });
+}
+
+export function ClienteForm({ initialData, onSubmit, onDelete }) {
   const [form, setForm] = useState({
     nome: initialData?.nome ?? '',
     telefone: formatPhone(initialData?.telefone ?? ''),
@@ -108,13 +60,7 @@ export function ClienteForm({ initialData, onSubmit }) {
       </Field>
 
       <Field label="Telefone">
-        <input
-          className={inputClass}
-          inputMode="tel"
-          value={form.telefone}
-          onChange={(event) => setForm({ ...form, telefone: formatPhone(event.target.value) })}
-          placeholder="(85) 99999-9999"
-        />
+        <input className={inputClass} inputMode="tel" value={form.telefone} onChange={(event) => setForm({ ...form, telefone: formatPhone(event.target.value) })} placeholder="(85) 99999-9999" />
       </Field>
 
       <div className="grid grid-cols-[1fr_92px] gap-3">
@@ -141,6 +87,12 @@ export function ClienteForm({ initialData, onSubmit }) {
       <button className="w-full rounded-lg bg-app-coral py-4 font-black text-white disabled:bg-app-muted" disabled={!canSubmit || isSubmitting} type="submit">
         {isSubmitting ? 'Salvando...' : initialData ? 'Atualizar cliente' : 'Salvar cliente'}
       </button>
+
+      {initialData && onDelete ? (
+        <button className="flex h-12 w-full items-center justify-center gap-2 rounded-lg border border-red-100 bg-red-50 font-black text-app-red" onClick={onDelete} type="button">
+          <Trash2 size={18} /> Excluir cliente
+        </button>
+      ) : null}
     </form>
   );
 }
@@ -150,14 +102,18 @@ export function ContaForm({ clientes, onSubmit, onCreateCliente }) {
     clienteId: '',
     itemComprado: '',
     valorTotal: '',
+    tipoCobranca: 'avista',
     dataLembrete: todayIso(),
-    parcelas: '1'
+    parcelas: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const valorNumerico = normalizeMoney(form.valorTotal);
-  const quantidadeParcelas = Number(form.parcelas || 1);
-  const valorParcela = quantidadeParcelas > 0 ? valorNumerico / quantidadeParcelas : valorNumerico;
+  const parcelasDigitadas = Number.parseInt(form.parcelas || '2', 10);
+  const quantidadeParcelas = form.tipoCobranca === 'parcelado'
+    ? Math.min(Math.max(Number.isNaN(parcelasDigitadas) ? 2 : parcelasDigitadas, 2), 24)
+    : 1;
+  const valoresParcelas = splitMoney(valorNumerico, quantidadeParcelas);
   const canSubmit = Boolean(form.clienteId) && form.itemComprado.trim().length >= 2 && valorNumerico > 0;
 
   async function submit(event) {
@@ -178,12 +134,7 @@ export function ContaForm({ clientes, onSubmit, onCreateCliente }) {
 
   if (clientes.length === 0) {
     return (
-      <EmptyState
-        title="Cadastre um cliente primeiro"
-        text="A cobranca precisa ficar ligada a uma pessoa para aparecer no caderninho."
-        action="Cadastrar cliente"
-        onAction={onCreateCliente}
-      />
+      <EmptyState title="Cadastre um cliente primeiro" text="A cobranca precisa ficar ligada a uma pessoa para aparecer no caderninho." action="Cadastrar cliente" onAction={onCreateCliente} />
     );
   }
 
@@ -201,41 +152,54 @@ export function ContaForm({ clientes, onSubmit, onCreateCliente }) {
       </Field>
 
       <Field label="Valor total">
-        <input
-          className={inputClass}
-          inputMode="numeric"
-          value={form.valorTotal}
-          onChange={(event) => setForm({ ...form, valorTotal: formatCurrencyInput(event.target.value) })}
-          placeholder="R$ 0,00"
-        />
+        <input className={inputClass} inputMode="numeric" value={form.valorTotal} onChange={(event) => setForm({ ...form, valorTotal: formatCurrencyInput(event.target.value) })} placeholder="R$ 0,00" />
       </Field>
 
-      <Field label="Parcelas">
-        <div className="grid grid-cols-4 gap-2">
-          {parcelaOptions.map((option) => {
-            const selected = quantidadeParcelas === option;
-            return (
-              <button
-                key={option}
-                className={`h-11 rounded-lg border text-sm font-black ${selected ? 'border-app-coral bg-app-coral text-white' : 'border-app-line bg-white text-app-muted'}`}
-                onClick={() => setForm({ ...form, parcelas: String(option) })}
-                type="button"
-              >
-                {option === 1 ? 'A vista' : `${option}x`}
-              </button>
-            );
-          })}
+      {valorNumerico > 0 ? (
+        <div>
+          <span className="mb-1 block text-sm font-black text-app-muted">Forma de cobranca</span>
+          <div className="grid grid-cols-2 gap-2">
+            <button className={`h-12 rounded-lg border font-black ${form.tipoCobranca === 'avista' ? 'border-app-coral bg-app-coral text-white' : 'border-app-line bg-white text-app-muted'}`} onClick={() => setForm({ ...form, tipoCobranca: 'avista', parcelas: '' })} type="button">
+              A vista
+            </button>
+            <button className={`h-12 rounded-lg border font-black ${form.tipoCobranca === 'parcelado' ? 'border-app-coral bg-app-coral text-white' : 'border-app-line bg-white text-app-muted'}`} onClick={() => setForm({ ...form, tipoCobranca: 'parcelado', parcelas: form.parcelas || '2' })} type="button">
+              Parcelado
+            </button>
+          </div>
         </div>
-        {valorNumerico > 0 ? (
-          <p className="mt-2 rounded-lg bg-app-coralSoft px-3 py-2 text-sm font-black text-app-coralDark">
-            {quantidadeParcelas === 1 ? 'Uma cobranca unica' : `${quantidadeParcelas} parcelas de ${formatMoney(valorParcela)}`}
-          </p>
-        ) : null}
-      </Field>
+      ) : null}
 
-      <Field label="Primeira cobranca">
+      {valorNumerico > 0 && form.tipoCobranca === 'parcelado' ? (
+        <Field label="Quantidade de parcelas">
+          <input className={inputClass} inputMode="numeric" max="24" min="2" type="number" value={form.parcelas} onChange={(event) => setForm({ ...form, parcelas: event.target.value.replace(/\D/g, '').slice(0, 2) })} placeholder="2" />
+        </Field>
+      ) : null}
+
+      <Field label="Primeiro vencimento">
         <input className={inputClass} type="date" value={form.dataLembrete} onChange={(event) => setForm({ ...form, dataLembrete: event.target.value })} />
       </Field>
+
+      {valorNumerico > 0 ? (
+        <div className="rounded-lg border border-app-line bg-white p-3">
+          <p className="font-black text-app-ink">
+            {quantidadeParcelas === 1
+              ? `${formatMoney(valorNumerico)} a vista`
+              : `${formatMoney(valorNumerico)} em ${quantidadeParcelas}x`}
+          </p>
+          <p className="mt-1 text-sm font-bold text-app-muted">
+            {quantidadeParcelas === 1 ? 'Uma cobranca unica' : `${quantidadeParcelas} parcelas com vencimentos mensais`}
+          </p>
+          <div className="mt-3 space-y-2">
+            {valoresParcelas.map((valor, index) => (
+              <div key={`${valor}-${index}`} className="flex items-center justify-between rounded-md bg-app-paper px-3 py-2 text-sm">
+                <span className="font-black">Parcela {index + 1}/{quantidadeParcelas}</span>
+                <span className="font-bold text-app-muted">{formatDate(addMonths(form.dataLembrete, index))}</span>
+                <strong className="text-app-coralDark">{formatMoney(valor)}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <button className="w-full rounded-lg bg-app-coral py-4 font-black text-white disabled:bg-app-muted" disabled={!canSubmit || isSubmitting} type="submit">
         {isSubmitting ? 'Salvando...' : 'Salvar cobranca'}
@@ -247,18 +211,18 @@ export function ContaForm({ clientes, onSubmit, onCreateCliente }) {
 export function PagamentoForm({ cobranca, parcela, onSubmit }) {
   const totalParcelas = Number(cobranca.conta.parcelas || cobranca.lembretesDaConta?.length || 1);
   const numeroParcela = Number(parcela?.parcela_numero || 1);
-  const valorParcela = parcela ? Math.min(Number(parcela.valor_previsto || cobranca.saldoRestante), cobranca.saldoRestante) : 0;
+  const saldoParcela = parcela ? Math.min(Number(parcela.saldo_parcela ?? parcela.valor_previsto ?? cobranca.saldoRestante), cobranca.saldoRestante) : 0;
   const [form, setForm] = useState({
-    valorPago: parcela ? formatMoney(valorParcela) : '',
+    valorPago: parcela ? formatMoney(saldoParcela) : '',
     metodo: 'pix',
     observacao: parcela ? `Parcela ${numeroParcela}/${totalParcelas}` : ''
   });
   const [comprovanteFile, setComprovanteFile] = useState(null);
-  const [assinatura, setAssinatura] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const valorDigitado = normalizeMoney(form.valorPago);
   const excedeSaldo = valorDigitado > 0 && valorDigitado > cobranca.saldoRestante;
+  const excedeParcela = parcela && valorDigitado > saldoParcela && !excedeSaldo;
   const valorInvalido = valorDigitado <= 0 || excedeSaldo;
 
   function readFile(event) {
@@ -276,8 +240,9 @@ export function PagamentoForm({ cobranca, parcela, onSubmit }) {
       await onSubmit({
         ...form,
         contaId: cobranca.conta.id,
+        parcelaId: parcela?.id,
         comprovanteFile: comprovanteFile ?? null,
-        comprovanteDataUrl: comprovanteFile ? null : assinatura
+        comprovanteDataUrl: null
       });
     } finally {
       setIsSubmitting(false);
@@ -289,19 +254,17 @@ export function PagamentoForm({ cobranca, parcela, onSubmit }) {
       <div className="rounded-lg bg-app-coralSoft p-3">
         <p className="text-sm font-bold text-app-coralDark">Saldo a receber</p>
         <strong className="text-2xl font-black text-app-coralDark">{formatMoney(cobranca.saldoRestante)}</strong>
+        {parcela ? <p className="mt-1 text-sm font-black text-app-coralDark">Parcela {numeroParcela}/{totalParcelas}: falta {formatMoney(saldoParcela)}</p> : null}
       </div>
 
       <Field label="Valor pago">
-        <input
-          className={`${inputClass} ${excedeSaldo ? 'border-app-red' : ''}`}
-          inputMode="numeric"
-          value={form.valorPago}
-          onChange={(event) => setForm({ ...form, valorPago: formatCurrencyInput(event.target.value) })}
-          placeholder="R$ 0,00"
-        />
+        <input className={`${inputClass} ${excedeSaldo ? 'border-app-red' : ''}`} inputMode="numeric" value={form.valorPago} onChange={(event) => setForm({ ...form, valorPago: formatCurrencyInput(event.target.value) })} placeholder="R$ 0,00" />
         {excedeSaldo ? (
-          <p className="mt-1 text-xs font-bold text-app-red">
-            Valor maior que o saldo restante ({formatMoney(cobranca.saldoRestante)}). Corrija antes de salvar.
+          <p className="mt-1 text-xs font-bold text-app-red">Valor maior que o saldo restante ({formatMoney(cobranca.saldoRestante)}). Corrija antes de salvar.</p>
+        ) : null}
+        {excedeParcela ? (
+          <p className="mt-1 rounded-md bg-yellow-50 px-2 py-1 text-xs font-black text-app-yellow">
+            O excedente sera abatido nas proximas parcelas em ordem.
           </p>
         ) : null}
       </Field>
@@ -319,17 +282,115 @@ export function PagamentoForm({ cobranca, parcela, onSubmit }) {
       </Field>
 
       <div className="rounded-lg border border-app-line bg-white p-3">
-        <label className="flex h-12 cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-app-line font-black text-app-coralDark">
-          <FileImage size={20} /> Anexar comprovante
-          <input accept="image/*" className="hidden" type="file" onChange={readFile} />
-        </label>
+        <p className="mb-2 text-sm font-black text-app-muted">Comprovante</p>
+        <div className="grid grid-cols-2 gap-2">
+          <label className="flex h-12 cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-app-line font-black text-app-coralDark">
+            <Camera size={20} /> Tirar foto
+            <input accept="image/*" capture="environment" className="hidden" type="file" onChange={readFile} />
+          </label>
+          <label className="flex h-12 cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-app-line font-black text-app-coralDark">
+            <FileImage size={20} /> Anexar
+            <input accept="image/*" className="hidden" type="file" onChange={readFile} />
+          </label>
+        </div>
         {comprovanteFile ? <p className="mt-2 text-xs font-bold text-app-green">Comprovante pronto: {comprovanteFile.name}</p> : null}
       </div>
 
-      <SignaturePad value={assinatura} onChange={setAssinatura} />
-
       <button className="w-full rounded-lg bg-app-coral py-4 font-black text-white disabled:bg-app-muted" disabled={valorInvalido || isSubmitting} type="submit">
         {isSubmitting ? 'Salvando...' : 'Salvar pagamento'}
+      </button>
+    </form>
+  );
+}
+function buildPlanoPorValor(total, valorParcela) {
+  const saldo = Number(Number(total || 0).toFixed(2));
+  const valor = Number(Number(valorParcela || 0).toFixed(2));
+  if (saldo <= 0 || valor <= 0) return [];
+
+  const plano = [];
+  let restante = saldo;
+
+  while (restante > 0.009 && plano.length < 24) {
+    const valorAtual = plano.length === 23 ? restante : Math.min(valor, restante);
+    plano.push(Number(valorAtual.toFixed(2)));
+    restante = Number((restante - valorAtual).toFixed(2));
+  }
+
+  return plano;
+}
+
+export function AjustarParcelasForm({ cobranca, onSubmit }) {
+  const parcelasAbertas = (cobranca.lembretesDaConta || []).filter((item) => item.statusVisual !== 'paga' && item.status !== 'resolvido');
+  const quantidadeInicial = Math.max(parcelasAbertas.filter((item) => Number(item.valor_pago || 0) <= 0).length, 1);
+  const [form, setForm] = useState({
+    quantidadeParcelas: String(quantidadeInicial),
+    valorParcela: '',
+    primeiraData: cobranca.lembrete?.data_agendada || todayIso()
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const saldoRestante = Number(cobranca.saldoRestante || 0);
+  const valorMensal = normalizeMoney(form.valorParcela);
+  const quantidadeDigitada = Number.parseInt(form.quantidadeParcelas || '1', 10);
+  const quantidadeParcelas = Math.min(Math.max(Number.isNaN(quantidadeDigitada) ? 1 : quantidadeDigitada, 1), 24);
+  const plano = valorMensal > 0 ? buildPlanoPorValor(saldoRestante, valorMensal) : splitMoney(saldoRestante, quantidadeParcelas);
+  const canSubmit = saldoRestante > 0 && plano.length > 0 && Boolean(form.primeiraData);
+
+  async function submit(event) {
+    event.preventDefault();
+    if (!canSubmit || isSubmitting) return;
+
+    setIsSubmitting(true);
+    try {
+      await onSubmit({
+        quantidadeParcelas: valorMensal > 0 ? plano.length : quantidadeParcelas,
+        valorParcela: form.valorParcela,
+        primeiraData: form.primeiraData
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <form className="space-y-4" onSubmit={submit}>
+      <div className="rounded-lg bg-app-coralSoft p-3">
+        <p className="text-sm font-bold text-app-coralDark">Saldo para reorganizar</p>
+        <strong className="text-2xl font-black text-app-coralDark">{formatMoney(saldoRestante)}</strong>
+        <p className="mt-1 text-xs font-bold text-app-coralDark">Pagamentos ja feitos ficam preservados no historico.</p>
+      </div>
+
+      <Field label="Quantidade de parcelas restantes">
+        <input className={inputClass} inputMode="numeric" max="24" min="1" type="number" value={form.quantidadeParcelas} onChange={(event) => setForm({ ...form, quantidadeParcelas: event.target.value.replace(/\D/g, '').slice(0, 2) })} placeholder="2" />
+      </Field>
+
+      <Field label="Valor por parcela (opcional)">
+        <input className={inputClass} inputMode="numeric" value={form.valorParcela} onChange={(event) => setForm({ ...form, valorParcela: formatCurrencyInput(event.target.value) })} placeholder="Ex.: R$ 150,00" />
+        <p className="mt-1 text-xs font-bold text-app-muted">Se preencher este campo, o app calcula quantas parcelas serao necessarias.</p>
+      </Field>
+
+      <Field label="Primeiro proximo vencimento">
+        <input className={inputClass} type="date" value={form.primeiraData} onChange={(event) => setForm({ ...form, primeiraData: event.target.value })} />
+      </Field>
+
+      <div className="rounded-lg border border-app-line bg-white p-3">
+        <p className="font-black text-app-ink">Previa do novo plano</p>
+        <p className="mt-1 text-sm font-bold text-app-muted">
+          {plano.length} parcela(s) para quitar {formatMoney(saldoRestante)}
+        </p>
+        <div className="mt-3 space-y-2">
+          {plano.map((valor, index) => (
+            <div key={`${valor}-${index}`} className="flex items-center justify-between rounded-md bg-app-paper px-3 py-2 text-sm">
+              <span className="font-black">Parcela {index + 1}/{plano.length}</span>
+              <span className="font-bold text-app-muted">{formatDate(addMonths(form.primeiraData, index))}</span>
+              <strong className="text-app-coralDark">{formatMoney(valor)}</strong>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <button className="w-full rounded-lg bg-app-coral py-4 font-black text-white disabled:bg-app-muted" disabled={!canSubmit || isSubmitting} type="submit">
+        {isSubmitting ? 'Salvando...' : 'Salvar ajuste das parcelas'}
       </button>
     </form>
   );

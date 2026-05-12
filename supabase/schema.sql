@@ -68,6 +68,8 @@ create table if not exists lembretes (
   conta_id uuid not null references contas(id) on delete cascade,
   data_agendada date not null,
   parcela_numero integer not null default 1 check (parcela_numero > 0),
+  valor_original numeric(12, 2),
+  valor_pago numeric(12, 2) not null default 0,
   valor_previsto numeric(12, 2),
   status text not null check (status in ('pendente', 'alertado', 'resolvido')),
   created_at timestamptz not null default now(),
@@ -107,6 +109,8 @@ alter table transacoes add column if not exists updated_at timestamptz not null 
 alter table transacoes add column if not exists deleted_at timestamptz;
 
 alter table lembretes add column if not exists parcela_numero integer not null default 1;
+alter table lembretes add column if not exists valor_original numeric(12, 2);
+alter table lembretes add column if not exists valor_pago numeric(12, 2) not null default 0;
 alter table lembretes add column if not exists valor_previsto numeric(12, 2);
 alter table lembretes add column if not exists created_at timestamptz not null default now();
 alter table lembretes add column if not exists updated_at timestamptz not null default now();
@@ -217,3 +221,5 @@ begin
     alter publication supabase_realtime add table comprovantes;
   end if;
 end $$;
+
+
