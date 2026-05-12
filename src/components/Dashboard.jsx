@@ -309,6 +309,7 @@ export function Dashboard({ currentUser, profile, onProfileUpdated, isOnline, la
   }
 
   const currentTitle = activeTab === 'clientes' ? 'Clientes' : activeTab === 'lembretes' ? 'Agenda' : 'Cobrancas';
+  const businessName = profile?.nome_negocio?.trim() || currentUser?.user_metadata?.nome_negocio?.trim() || profile?.nome?.trim() || currentUser?.user_metadata?.nome?.trim() || 'Seu comercio';
 
   return (
     <main className="min-h-screen bg-app-paper pb-28 text-app-ink">
@@ -321,7 +322,8 @@ export function Dashboard({ currentUser, profile, onProfileUpdated, isOnline, la
               </div>
               <div className="min-w-0">
                 <p className="text-xs font-bold text-app-muted">Caderninho Digital</p>
-                <h1 className="truncate text-xl font-black tracking-normal">{currentTitle}</h1>
+                <p className="truncate text-sm font-black text-app-coralDark">{businessName}</p>
+                <h1 className="truncate text-lg font-black tracking-normal">{currentTitle}</h1>
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
