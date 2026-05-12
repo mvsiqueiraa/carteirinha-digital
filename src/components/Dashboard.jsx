@@ -9,6 +9,7 @@ import {
   ReceiptText,
   Search,
   UserPlus,
+  UserCircle,
   Users,
   Wifi,
   WifiOff
@@ -25,8 +26,10 @@ import {
   updateCliente
 } from '../services/mutations';
 import { syncPendingChanges } from '../sync/supabaseSync';
+import { supabase } from '../lib/supabase';
+import { upsertProfile } from '../services/profiles';
 import { formatMoney } from '../utils/format';
-import { AjustarParcelasForm, ClienteForm, ContaForm, PagamentoForm } from './dashboard/forms';
+import { AjustarParcelasForm, ClienteForm, ContaForm, PagamentoForm, ProfileForm } from './dashboard/forms';
 import {
   ChargeDetail,
   ChargesList,
@@ -93,7 +96,7 @@ function BottomNav({ activeTab, setActiveTab }) {
   );
 }
 
-export function Dashboard({ isOnline, lastSync, isSupabaseConfigured }) {
+export function Dashboard({ currentUser, profile, onProfileUpdated, isOnline, lastSync, isSupabaseConfigured }) {
   const [data, setData] = useState({
     totalAReceber: 0,
     quantidadeAtrasados: 0,
@@ -109,6 +112,7 @@ export function Dashboard({ isOnline, lastSync, isSupabaseConfigured }) {
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const debounceTimerRef = useRef(null);
   const [modal, setModal] = useState(null);
+  const [returnToChargeAfterClient, setReturnToChargeAfterClient] = useState(false);
   const [selectedCharge, setSelectedCharge] = useState(null);
   const [selectedInstallment, setSelectedInstallment] = useState(null);
   const [selectedClient, setSelectedClient] = useState(null);
@@ -204,9 +208,24 @@ export function Dashboard({ isOnline, lastSync, isSupabaseConfigured }) {
     return lastSync ? `Sincronizado ${lastSync}` : 'Online';
   }, [data.syncPendentes, isOnline, isSyncing, isSupabaseConfigured, lastSync]);
 
+  async function saveProfile(form) {
+    if (!currentUser?.id) return;
+
+    const updated = await upsertProfile(currentUser.id, form);
+    onProfileUpdated?.(updated);
+    setModal(null);
+    showToast('Perfil salvo');
+  }
+
+  async function signOut() {
+    await supabase?.auth.signOut();
+    setModal(null);
+  }
+
   async function saveClient(form) {
     await createCliente(form);
-    setModal(null);
+    setModal(returnToChargeAfterClient ? 'conta' : null);
+    setReturnToChargeAfterClient(false);
     showToast('Cliente salvo');
   }
 
@@ -305,10 +324,17 @@ export function Dashboard({ isOnline, lastSync, isSupabaseConfigured }) {
                 <h1 className="truncate text-xl font-black tracking-normal">{currentTitle}</h1>
               </div>
             </div>
-            <button className="flex shrink-0 items-center gap-1 rounded-full border border-app-line bg-white px-2.5 py-2 text-xs font-bold text-app-muted" onClick={handleSync} type="button">
-              {isOnline ? <Wifi size={15} /> : <WifiOff size={15} />}
-              <span>{connectionText}</span>
-            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              <button className="flex items-center gap-1 rounded-full border border-app-line bg-white px-2.5 py-2 text-xs font-bold text-app-muted" onClick={handleSync} type="button">
+                {isOnline ? <Wifi size={15} /> : <WifiOff size={15} />}
+                <span>{connectionText}</span>
+              </button>
+              {currentUser ? (
+                <button className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-app-coralDark shadow-note" onClick={() => setModal('perfil')} type="button" aria-label="Abrir perfil">
+                  <UserCircle size={21} />
+                </button>
+              ) : null}
+            </div>
           </div>
 
           <div className="mt-3 rounded-lg bg-white px-4 py-3 shadow-note">
@@ -411,7 +437,7 @@ export function Dashboard({ isOnline, lastSync, isSupabaseConfigured }) {
 
         {activeTab === 'clientes' ? (
           <>
-            <button className="mb-3 flex w-full items-center gap-3 rounded-xl border border-app-line bg-white px-4 py-3 shadow-note transition-transform active:scale-95" onClick={() => setModal('cliente')} type="button">
+            <button className="mb-3 flex w-full items-center gap-3 rounded-xl border border-app-line bg-white px-4 py-3 shadow-note transition-transform active:scale-95" onClick={() => { setReturnToChargeAfterClient(false); setModal('cliente'); }} type="button">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-app-coralSoft text-app-coralDark">
                 <UserPlus size={20} />
               </div>
@@ -419,7 +445,7 @@ export function Dashboard({ isOnline, lastSync, isSupabaseConfigured }) {
             </button>
             <ClientsList
               clientes={filteredClients}
-              onCreate={() => setModal('cliente')}
+              onCreate={() => { setReturnToChargeAfterClient(false); setModal('cliente'); }}
               onEdit={(cliente) => { setSelectedClient(cliente); setModal('editar-cliente'); }}
               onDetail={(cliente) => { setSelectedClient(cliente); setModal('detalhe-cliente'); }}
             />
@@ -432,10 +458,10 @@ export function Dashboard({ isOnline, lastSync, isSupabaseConfigured }) {
       <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} />
 
       {toast ? <div className="fixed bottom-24 left-1/2 z-50 w-[calc(100%-32px)] max-w-md -translate-x-1/2 rounded-lg bg-app-ink px-4 py-3 text-center text-sm font-black text-white shadow-soft">{toast}</div> : null}
-
-      {modal === 'cliente' ? <Modal title="Novo cliente" onClose={() => setModal(null)}><ClienteForm onSubmit={saveClient} /></Modal> : null}
+      {modal === 'perfil' && currentUser ? <Modal title="Perfil" onClose={() => setModal(null)}><ProfileForm profile={profile} user={currentUser} onSubmit={saveProfile} onSignOut={signOut} /></Modal> : null}
+      {modal === 'cliente' ? <Modal title="Novo cliente" onClose={() => { setModal(returnToChargeAfterClient ? 'conta' : null); setReturnToChargeAfterClient(false); }}><ClienteForm onSubmit={saveClient} /></Modal> : null}
       {modal === 'editar-cliente' && selectedClient ? <Modal title="Editar cliente" onClose={() => { setModal(null); setSelectedClient(null); }}><ClienteForm initialData={selectedClient} onSubmit={saveEditedClient} onDelete={removeSelectedClient} /></Modal> : null}
-      {modal === 'conta' ? <Modal title="Nova cobranca" onClose={() => setModal(null)}><ContaForm clientes={data.clientes} onSubmit={saveCharge} onCreateCliente={() => setModal('cliente')} /></Modal> : null}
+      {modal === 'conta' ? <Modal title="Nova cobranca" onClose={() => setModal(null)}><ContaForm clientes={data.clientes} onSubmit={saveCharge} onCreateCliente={() => { setReturnToChargeAfterClient(true); setModal('cliente'); }} /></Modal> : null}
       {modal === 'pagamento' && selectedCharge ? <Modal title={selectedInstallment ? 'Receber parcela' : 'Registrar pagamento'} onClose={closePayment}><PagamentoForm cobranca={selectedCharge} parcela={selectedInstallment} onSubmit={savePayment} /></Modal> : null}
       {modal === 'ajustar-parcelas' && selectedCharge ? <Modal title="Ajustar parcelas" onClose={() => setModal(null)}><AjustarParcelasForm cobranca={selectedCharge} onSubmit={saveInstallmentAdjustment} /></Modal> : null}
       {modal === 'detalhe-cobranca' && selectedCharge ? (

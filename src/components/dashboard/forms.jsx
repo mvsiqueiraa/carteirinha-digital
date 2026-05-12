@@ -1,5 +1,5 @@
 ﻿import { useState } from 'react';
-import { Camera, FileImage, Trash2 } from 'lucide-react';
+import { Camera, FileText, Trash2, UserPlus } from 'lucide-react';
 import { normalizeMoney } from '../../services/mutations';
 import { formatCurrencyInput, formatDate, formatMoney, formatPhone, todayIso } from '../../utils/format';
 import { EmptyState, Field, inputClass, textAreaClass } from './ui';
@@ -141,10 +141,15 @@ export function ContaForm({ clientes, onSubmit, onCreateCliente }) {
   return (
     <form className="space-y-4" onSubmit={submit}>
       <Field label="Cliente">
-        <select className={inputClass} value={form.clienteId} onChange={(event) => setForm({ ...form, clienteId: event.target.value })}>
-          <option value="">Selecione</option>
-          {clientes.map((cliente) => <option key={cliente.id} value={cliente.id}>{cliente.nome}</option>)}
-        </select>
+        <div className="grid grid-cols-[1fr_auto] gap-2">
+          <select className={inputClass} value={form.clienteId} onChange={(event) => setForm({ ...form, clienteId: event.target.value })}>
+            <option value="">Selecione</option>
+            {clientes.map((cliente) => <option key={cliente.id} value={cliente.id}>{cliente.nome}</option>)}
+          </select>
+          <button className="flex h-12 items-center justify-center gap-2 rounded-lg border border-app-line bg-white px-3 text-sm font-black text-app-coralDark" onClick={onCreateCliente} type="button">
+            <UserPlus size={18} /> Novo cliente
+          </button>
+        </div>
       </Field>
 
       <Field label="O que foi comprado">
@@ -289,8 +294,8 @@ export function PagamentoForm({ cobranca, parcela, onSubmit }) {
             <input accept="image/*" capture="environment" className="hidden" type="file" onChange={readFile} />
           </label>
           <label className="flex h-12 cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-app-line font-black text-app-coralDark">
-            <FileImage size={20} /> Anexar
-            <input accept="image/*" className="hidden" type="file" onChange={readFile} />
+            <FileText size={20} /> Anexar
+            <input accept="image/*,application/pdf" className="hidden" type="file" onChange={readFile} />
           </label>
         </div>
         {comprovanteFile ? <p className="mt-2 text-xs font-bold text-app-green">Comprovante pronto: {comprovanteFile.name}</p> : null}
@@ -391,6 +396,57 @@ export function AjustarParcelasForm({ cobranca, onSubmit }) {
 
       <button className="w-full rounded-lg bg-app-coral py-4 font-black text-white disabled:bg-app-muted" disabled={!canSubmit || isSubmitting} type="submit">
         {isSubmitting ? 'Salvando...' : 'Salvar ajuste das parcelas'}
+      </button>
+    </form>
+  );
+}
+export function ProfileForm({ profile, user, onSubmit, onSignOut }) {
+  const [form, setForm] = useState({
+    nome: profile?.nome ?? user?.user_metadata?.nome ?? '',
+    nome_negocio: profile?.nome_negocio ?? user?.user_metadata?.nome_negocio ?? '',
+    telefone: formatPhone(profile?.telefone ?? '')
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const canSubmit = form.nome.trim().length >= 2;
+
+  async function submit(event) {
+    event.preventDefault();
+    if (!canSubmit || isSubmitting) return;
+
+    setIsSubmitting(true);
+    try {
+      await onSubmit(form);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <form className="space-y-4" onSubmit={submit}>
+      <div className="rounded-lg border border-app-line bg-white p-3">
+        <p className="text-sm font-black text-app-ink">Conta logada</p>
+        <p className="mt-1 text-sm font-bold text-app-muted">{user?.email}</p>
+      </div>
+
+      <Field label="Seu nome">
+        <input className={inputClass} value={form.nome} onChange={(event) => setForm({ ...form, nome: event.target.value })} placeholder="Seu nome" />
+      </Field>
+
+      <Field label="Nome do comercio">
+        <input className={inputClass} value={form.nome_negocio} onChange={(event) => setForm({ ...form, nome_negocio: event.target.value })} placeholder="Nome que aparece no app" />
+      </Field>
+
+      <Field label="Telefone">
+        <input className={inputClass} inputMode="tel" value={form.telefone} onChange={(event) => setForm({ ...form, telefone: formatPhone(event.target.value) })} placeholder="(85) 99999-9999" />
+      </Field>
+
+      <button className="h-12 w-full rounded-lg bg-app-coral font-black text-white disabled:bg-app-muted" disabled={!canSubmit || isSubmitting} type="submit">
+        {isSubmitting ? 'Salvando...' : 'Salvar perfil'}
+      </button>
+
+      <button className="h-12 w-full rounded-lg border border-red-100 bg-red-50 font-black text-app-red" onClick={onSignOut} type="button">
+        Sair deste aparelho
       </button>
     </form>
   );

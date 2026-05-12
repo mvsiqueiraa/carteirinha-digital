@@ -16,7 +16,7 @@ function stripLocalFields(record) {
   return payload;
 }
 
-async function pushQueueItem(queueItem) {
+async function pushQueueItem(queueItem, userId) {
   const localTable = db.table(queueItem.table);
   const record = await localTable.get(queueItem.record_id);
 
@@ -26,6 +26,9 @@ async function pushQueueItem(queueItem) {
   }
 
   const payload = stripLocalFields(record);
+  if (userId && ['clientes', 'contas', 'transacoes', 'lembretes', 'comprovantes'].includes(queueItem.table) && !payload.user_id) {
+    payload.user_id = userId;
+  }
 
   if (queueItem.operation === 'delete') {
     const { error } = await supabase
@@ -55,12 +58,17 @@ export async function syncPendingChanges() {
     return { synced: 0, skipped: true };
   }
 
+  const { data: authData } = await supabase.auth.getSession();
+  if (!authData.session) {
+    return { synced: 0, skipped: true };
+  }
+
   const queue = await db.syncQueue.orderBy('created_at').toArray();
   let synced = 0;
 
   for (const queueItem of queue) {
     try {
-      await pushQueueItem(queueItem);
+      await pushQueueItem(queueItem, authData.session.user.id);
       synced += 1;
     } catch (error) {
       await db.table(queueItem.table).update(queueItem.record_id, {
@@ -76,6 +84,11 @@ export async function syncPendingChanges() {
 
 export async function pullLatestChanges() {
   if (!navigator.onLine || !isSupabaseConfigured) {
+    return { pulled: 0, skipped: true };
+  }
+
+  const { data: authData } = await supabase.auth.getSession();
+  if (!authData.session) {
     return { pulled: 0, skipped: true };
   }
 
@@ -119,3 +132,4 @@ export function registerOnlineSync(onSynced) {
 
   return () => window.removeEventListener('online', runSync);
 }
+

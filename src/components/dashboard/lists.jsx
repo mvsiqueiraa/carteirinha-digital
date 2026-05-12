@@ -15,6 +15,11 @@
 import { formatDate, formatMoney, formatPhone, getWhatsAppUrl, statusLabel, statusStyles, todayIso } from '../../utils/format';
 import { EmptyState } from './ui';
 
+function isPdfComprovante(url) {
+  const value = String(url || '').toLowerCase();
+  return value.startsWith('data:application/pdf') || value.includes('.pdf') || value.includes('application/pdf');
+}
+
 function getParcelasResumo(cobranca) {
   const total = Number(cobranca.conta.parcelas || cobranca.lembretesDaConta?.length || 1);
   const pagas = (cobranca.lembretesDaConta || []).filter((item) => item.statusVisual === 'paga' || item.status === 'resolvido').length;
@@ -326,14 +331,20 @@ export function ChargeDetail({ cobranca, onPayment, onGeneralPayment, onPayInsta
                 <p className="mt-1 text-sm font-bold text-app-muted">{formatDate(transacao.data_pagamento)}</p>
                 {transacao.observacao ? <p className="mt-2 text-sm font-semibold">{transacao.observacao}</p> : null}
                 {transacao.comprovante ? (
-                  <details className="group mt-2">
-                    <summary className="inline-flex cursor-pointer select-none items-center gap-1 text-sm font-black text-app-coralDark outline-none">
-                      <FileImage size={16} /> Ver comprovante
-                    </summary>
-                    <div className="mt-2 overflow-hidden rounded-lg border border-app-line bg-app-paper">
-                      <img src={transacao.comprovante.url_imagem} alt="Comprovante" loading="lazy" className="w-full object-contain" />
-                    </div>
-                  </details>
+                  isPdfComprovante(transacao.comprovante.url_imagem) ? (
+                    <a className="mt-2 inline-flex h-10 items-center gap-2 rounded-lg border border-app-line bg-white px-3 text-sm font-black text-app-coralDark" href={transacao.comprovante.url_imagem} target="_blank" rel="noreferrer">
+                      <FileText size={16} /> Abrir comprovante PDF
+                    </a>
+                  ) : (
+                    <details className="group mt-2">
+                      <summary className="inline-flex cursor-pointer select-none items-center gap-1 text-sm font-black text-app-coralDark outline-none">
+                        <FileImage size={16} /> Ver comprovante
+                      </summary>
+                      <div className="mt-2 overflow-hidden rounded-lg border border-app-line bg-app-paper">
+                        <img src={transacao.comprovante.url_imagem} alt="Comprovante" loading="lazy" className="w-full object-contain" />
+                      </div>
+                    </details>
+                  )
                 ) : null}
               </div>
             ))}

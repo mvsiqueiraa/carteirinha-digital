@@ -1,4 +1,4 @@
-import Dexie from 'dexie';
+﻿import Dexie from 'dexie';
 import { syncStatuses, TABLES } from './schema';
 
 export const db = new Dexie('caderninho-digital');
@@ -28,8 +28,10 @@ export function createId() {
 
 export async function saveLocal(table, record, operation = 'upsert') {
   const currentTime = nowIso();
+  const currentUserId = window.localStorage.getItem('caderninho-current-user-id');
   const payload = {
     ...record,
+    ...(currentUserId && table !== TABLES.syncQueue ? { user_id: record.user_id ?? currentUserId } : {}),
     created_at: record.created_at ?? currentTime,
     updated_at: record.updated_at ?? currentTime,
     sync_status: syncStatuses.pending
@@ -50,10 +52,13 @@ export async function saveLocal(table, record, operation = 'upsert') {
 
 export async function updateLocal(table, id, changes, operation = 'upsert') {
   const currentTime = nowIso();
+  const currentUserId = window.localStorage.getItem('caderninho-current-user-id');
+  const userPatch = currentUserId && table !== TABLES.syncQueue ? { user_id: changes.user_id ?? currentUserId } : {};
 
   await db.transaction('rw', db.table(table), db.syncQueue, async () => {
     await db.table(table).update(id, {
       ...changes,
+      ...userPatch,
       updated_at: currentTime,
       sync_status: syncStatuses.pending
     });
@@ -68,9 +73,12 @@ export async function updateLocal(table, id, changes, operation = 'upsert') {
 
 export async function softDeleteLocal(table, id) {
   const currentTime = nowIso();
+  const currentUserId = window.localStorage.getItem('caderninho-current-user-id');
+  const userPatch = currentUserId && table !== TABLES.syncQueue ? { user_id: currentUserId } : {};
 
   await db.transaction('rw', db.table(table), db.syncQueue, async () => {
     await db.table(table).update(id, {
+      ...userPatch,
       deleted_at: currentTime,
       updated_at: currentTime,
       sync_status: syncStatuses.pending
@@ -85,3 +93,4 @@ export async function softDeleteLocal(table, id) {
 }
 
 export { TABLES };
+
