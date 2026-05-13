@@ -40,6 +40,7 @@ export function AuthScreen() {
           email: form.email.trim(),
           password: form.password,
           options: {
+            emailRedirectTo: window.location.origin,
             data: {
               nome: form.nome.trim(),
               nome_negocio: form.nome_negocio.trim()

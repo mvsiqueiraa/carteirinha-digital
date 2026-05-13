@@ -3,6 +3,8 @@ import { liveQuery } from 'dexie';
 import {
   CalendarDays,
   ClipboardList,
+  Eye,
+  EyeOff,
   Home,
   Plus,
   Receipt,
@@ -118,6 +120,7 @@ export function Dashboard({ currentUser, profile, onProfileUpdated, isOnline, la
   const [selectedClient, setSelectedClient] = useState(null);
   const [toast, setToast] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
+  const [showTotal, setShowTotal] = useState(() => window.localStorage.getItem('caderninho-show-total') !== 'false');
   const [installPrompt, setInstallPrompt] = useState(null);
 
   async function loadDashboard() {
@@ -125,6 +128,9 @@ export function Dashboard({ currentUser, profile, onProfileUpdated, isOnline, la
     setData(dashboardData);
   }
 
+  useEffect(() => {
+    window.localStorage.setItem('caderninho-show-total', String(showTotal));
+  }, [showTotal]);
   useEffect(() => {
     const subscription = liveQuery(() => getDashboardData()).subscribe({
       next: setData,
@@ -340,9 +346,14 @@ export function Dashboard({ currentUser, profile, onProfileUpdated, isOnline, la
           </div>
 
           <div className="mt-3 rounded-lg bg-white px-4 py-3 shadow-note">
-            <p className="text-xs font-bold text-app-muted">Total a receber</p>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs font-bold text-app-muted">Total a receber</p>
+              <button className="flex h-9 w-9 items-center justify-center rounded-lg bg-app-paper text-app-coralDark" onClick={() => setShowTotal((value) => !value)} type="button" aria-label={showTotal ? 'Esconder total a receber' : 'Mostrar total a receber'}>
+                {showTotal ? <Eye size={18} /> : <EyeOff size={18} />}
+              </button>
+            </div>
             <strong className="block text-2xl font-black tracking-normal text-app-coralDark">
-              {formatMoney(data.totalAReceber)}
+              {showTotal ? formatMoney(data.totalAReceber) : 'R$ *****'}
             </strong>
           </div>
         </div>
